@@ -1,0 +1,20 @@
+trigger:
+  branches:
+    include:
+      - 'master' # Trigger on changes to the main branch
+
+jobs:
+- job: SemanticVersioning
+  displayName: 'Semantic Versioning and Tagging'
+  pool:
+    name: agent140
+  steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - script: |
+      chmod +x update_version.sh
+      ./update_version.sh
+    displayName: 'Run Versioning Script'
+    env:
+      GIT_PAT: $(GIT_PAT) # Use the PAT as an environment variable
