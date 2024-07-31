@@ -1,0 +1,1240 @@
+##########################################################
+
+
+now i want to implement or make changes in this script as per the below described logic 
+
+script -
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+$latestTag = git describe --tags (git rev-list --tags --max-count=1) 2>$null
+
+if (-not $latestTag) {
+  $latestTag = "1.0.0"
+}
+
+# Parse the version into major, minor, and patch
+$versionParts = $latestTag -split '\.'
+$major = [int]$versionParts[0]
+$minor = [int]$versionParts[1]
+$patch = [int]$versionParts[2]
+
+# Get the latest commit message
+$latestCommitMessage = git log -1 --pretty=%B
+
+# Determine the version increment type
+if ($latestCommitMessage -like "*breakout*") {
+  $major++
+  $minor = 0
+  $patch = 0
+} elseif ($latestCommitMessage -like "*feat*") {
+  $minor++
+  $patch = 0
+} elseif ($latestCommitMessage -like "*fix*") {
+  $patch++
+} else {
+  Write-Output "No version change needed."
+  exit 0
+}
+
+# Construct the new version
+$newVersion = "$major.$minor.$patch"
+
+# Create a new tag
+git tag -a "$newVersion" -m "Release $newVersion"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$env:GIT_PAT")))" push origin "$newVersion"
+
+# Output the new version
+Write-Output "##vso[build.updatebuildnumber]$newVersion"
+Write-Output "Version updated to $newVersion"
+
+Logic -
+
+my default/base tag is = 0.0.0
+
+my tags looks like these / or i want tags like these - "Dev/feature-0.1.0" "Dev/feature-0.1.1" "Qa/feature-0.1.2" "Qa/feature-0.2.0" "Prod/feature-1.0.0"
+
+we have three env - "dev" "qa" "prod"
+
+our git branching stratgey is - one main/master branch for deploying the code into all the three environments
+
+now how the commit messages will be 
+
+commit message -- "dev-fix" "dev-feat" ----> then the changes will be it will featch the lastest tag's and get the last three numeric values of the latest tag that is the latest semantic version like "0.1.0" the according to fix , feat it will make the cahnges in the version and according to the env before fix or feat it will craete the latest tag 
+
+like lets suppose latest tag is "Qa/feature-0.1.2" it will fetch the last three values that is 0.1.2 and if the commit message is "dev-feat" then increment will be 0.2.0 and tag will be Dev/feature-0.2.0 
+
+similarly for qa commit mesaages can be "qa-fix" or "qa-feat" then the changes will be the same as done in case for dev for incremennt in version but for tag it will be 
+"qa-fix" ---> "Qa/feature-"incremented-version""
+
+but in case of message "prod-breakout" the tag will be ---> "Prod/feature-1.0.0"
+
+breakout keyword is reserved for when we need to create tag for prod
+
+##########################################################################
+
+ChatGPT
+To implement the described logic, you'll need to modify the versioning script to handle environment-specific tags and commit messages. Here's the updated script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Determine the environment and version increment type
+if [[ $latest_commit_message == dev-* ]]; then
+  env="Dev"
+elif [[ $latest_commit_message == qa-* ]]; then
+  env="Qa"
+elif [[ $latest_commit_message == prod-* ]]; then
+  env="Prod"
+fi
+
+# Determine the version increment type
+if [[ $latest_commit_message == *-breakout ]]; then
+  major=$((major + 1))
+  minor=0
+  patch=0
+elif [[ $latest_commit_message == *-feat ]]; then
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *-fix ]]; then
+  patch=$((patch + 1))
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation
+Fetch Tags: The script fetches all tags from the remote repository.
+Determine the Latest Tag: It finds the latest tag, or defaults to 0.0.0 if no tags exist.
+Parse the Version: It extracts and parses the version numbers (major, minor, patch) from the latest tag.
+Determine Environment: It checks the latest commit message to determine the environment (Dev, Qa, Prod).
+Increment Version: Based on the commit message (-breakout, -feat, -fix), it increments the appropriate version part.
+Create New Tag: It constructs the new version and tag name, then creates and pushes the new tag to the remote repository.
+Output the New Version: It outputs the new version for Azure DevOps to update the build number.
+Usage
+Commit messages like dev-fix, dev-feat, qa-fix, qa-feat, prod-breakout will trigger the appropriate version increments and tag creations.
+The tag format will be Dev/feature-X.Y.Z, Qa/feature-X.Y.Z, Prod/feature-X.Y.Z based on the environment specified in the commit message.
+Running the Script
+Ensure this script is executable and called in your Azure DevOps pipeline. Adjust the pipeline YAML to call this script and pass the necessary environment variables like GIT_PAT.
+
+there is one changes we are doing breakout only when we are about to deploy into production with commit message 
+"dev-*" or "qa-*" breakout cannot be used 
+
+and commit message with "prod-*"
+cannot use words like "fix" or "feat"
+ChatGPT
+To address the new requirements, we need to refine the logic for handling commit messages and environment-specific tagging. The logic will be adjusted to ensure that:
+
+breakout is only used when the commit message starts with prod-.
+fix and feat are only used when the commit message starts with dev- or qa-.
+Here's the updated script incorporating these changes:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Determine the environment
+if [[ $latest_commit_message == dev-* ]]; then
+  env="Dev"
+elif [[ $latest_commit_message == qa-* ]]; then
+  env="Qa"
+elif [[ $latest_commit_message == prod-* ]]; then
+  env="Prod"
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Determine the version increment type
+if [[ $env == "Prod" && $latest_commit_message == *-breakout ]]; then
+  major=$((major + 1))
+  minor=0
+  patch=0
+elif [[ $env != "Prod" && $latest_commit_message == *-feat ]]; then
+  minor=$((minor + 1))
+  patch=0
+elif [[ $env != "Prod" && $latest_commit_message == *-fix ]]; then
+  patch=$((patch + 1))
+else
+  echo "Invalid commit message for the environment."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation of Changes:
+Environment Check: The script now includes a default exit condition for commit messages that don't start with dev-, qa-, or prod-.
+
+Version Increment Logic:
+
+Prod Environment: Only breakout is accepted for prod-* commit messages.
+Dev and QA Environments: Only fix and feat are accepted for dev-* and qa-* commit messages.
+Invalid Commit Messages: The script exits with a message if an invalid commit message is detected for the given environment.
+
+Usage in Azure DevOps Pipeline
+Ensure your Azure DevOps pipeline YAML file calls this script appropriately. For Windows agents, modify the YAML to use PowerShell to run the script.
+
+Here's an example of the updated YAML:
+
+yaml
+Copy code
+trigger:
+  branches:
+    include:
+      - 'master' # Trigger on changes to the main branch
+
+jobs:
+- job: SemanticVersioning
+  displayName: 'Semantic Versioning and Tagging'
+  pool:
+    vmImage: 'windows-latest'
+  steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - powershell: |
+      bash update_version.sh
+    displayName: 'Run Versioning Script'
+    env:
+      GIT_PAT: $(GIT_PAT) # Use the PAT as an environment variable
+This YAML file assumes you have a bash script named update_version.sh that contains the updated script. Adjust the paths and environment variables as needed.
+
+the whenre is the logic for "dev-fix" "dev-feat" "qa-fix" "qa-feat" here ?
+
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Determine the environment
+if [[ $latest_commit_message == dev-* ]]; then
+  env="Dev"
+elif [[ $latest_commit_message == qa-* ]]; then
+  env="Qa"
+elif [[ $latest_commit_message == prod-* ]]; then
+  env="Prod"
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Determine the version increment type
+if [[ $env == "Prod" && $latest_commit_message == *-breakout ]]; then
+  major=$((major + 1))
+  minor=0
+  patch=0
+elif [[ $env != "Prod" && $latest_commit_message == *-feat ]]; then
+  minor=$((minor + 1))
+  patch=0
+elif [[ $env != "Prod" && $latest_commit_message == *-fix ]]; then
+  patch=$((patch + 1))
+else
+  echo "Invalid commit message for the environment."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+ChatGPT
+Let's enhance the script to clearly differentiate the handling of dev-fix, dev-feat, qa-fix, and qa-feat in addition to prod-breakout.
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == dev-* ]]; then
+  env="Dev"
+  if [[ $latest_commit_message == *-feat ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *-fix ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for dev environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == qa-* ]]; then
+  env="Qa"
+  if [[ $latest_commit_message == *-feat ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *-fix ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for qa environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == prod-* ]]; then
+  env="Prod"
+  if [[ $latest_commit_message == *-breakout ]]; then
+    major=$((major + 1))
+    minor=0
+    patch=0
+  else
+    echo "Invalid commit message for prod environment."
+    exit 0
+  fi
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation of Changes:
+Environment Check and Version Increment:
+
+For dev-* commit messages, the script now checks for dev-feat and dev-fix and increments the version accordingly.
+For qa-* commit messages, the script now checks for qa-feat and qa-fix and increments the version accordingly.
+For prod-* commit messages, the script checks for prod-breakout and increments the version accordingly. Other commit messages for prod-* are considered invalid.
+Error Handling:
+
+If the commit message does not contain the appropriate keyword for the environment, the script exits with an error message indicating an invalid commit message.
+This script should now correctly handle the logic for dev-fix, dev-feat, qa-fix, qa-feat, and prod-breakout commit messages and increment the version numbers as specified.
+
+i did "commit ----> raised pr " 2 times with bellow commit messages still it is not able to detect and says "no version change needed"
+
+dev-feat
+
+dev-fix Added file update_version.sh
+
+ChatGPT
+Let's troubleshoot and refine the script to ensure it correctly detects the commit messages and updates the version. The main issue might be related to how the commit messages are being checked or fetched. We can add some debugging statements to help us understand what's happening.
+
+Here's the refined script with additional debugging:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Debugging: Output the latest commit message
+echo "Latest commit message: $latest_commit_message"
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == dev-* ]]; then
+  env="Dev"
+  if [[ $latest_commit_message == *-feat ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *-fix ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for dev environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == qa-* ]]; then
+  env="Qa"
+  if [[ $latest_commit_message == *-feat ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *-fix ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for qa environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == prod-* ]]; then
+  env="Prod"
+  if [[ $latest_commit_message == *-breakout ]]; then
+    major=$((major + 1))
+    minor=0
+    patch=0
+  else
+    echo "Invalid commit message for prod environment."
+    exit 0
+  fi
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Debugging: Output the new version and new tag
+echo "New version: $new_version"
+echo "New tag: $new_tag"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+What to Check and Do:
+Debugging Statements: The script now includes debugging statements that print the latest commit message, the new version, and the new tag. This should help you see what's happening with each step.
+
+Commit Messages: Ensure that the commit messages are exactly as specified (dev-feat, dev-fix, qa-feat, qa-fix, prod-breakout). Double-check the case sensitivity and format.
+
+PR Workflow: Ensure that the PR workflow is correctly set up to trigger the script. Sometimes, the commit message might not be captured correctly if the PR workflow does not trigger as expected.
+
+Run Script Manually: Try running the script manually in your local environment or in the CI environment to see the output of the debugging statements and understand where the script might be failing.
+
+Next Steps:
+Run the Script with the Provided Commit Messages:
+
+dev-feat
+dev-fix Added file update_version.sh
+Check the Output:
+
+Verify if the script correctly detects the commit messages and prints the expected debug information.
+Ensure the version is updated and a new tag is created as expected.
+Adjust if Necessary:
+
+Based on the output of the debugging statements, adjust the script if necessary to ensure it handles the commit messages correctly.
+still same problem 
+
+result from script 
+
+current version: 0.0.0
+latest_commit_message : Merged PR 11334: qa-fix
+
+qa-fix
+No version change needed.
+ChatGPT
+The script is failing to detect the correct commit message format due to the Merged PR prefix in the commit message. We need to adjust the script to handle merged commit messages by extracting the actual commit message from the PR merge commit.
+
+Let's refine the script to handle this scenario:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Debugging: Output the latest commit message
+echo "Latest commit message: $latest_commit_message"
+
+# Extract the actual commit message if it is a merged PR
+if [[ $latest_commit_message == *"Merged PR"* ]]; then
+  latest_commit_message=$(git log -2 --pretty=%B | tail -1)
+fi
+
+# Debugging: Output the actual commit message after extraction
+echo "Actual commit message: $latest_commit_message"
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == dev-* ]]; then
+  env="Dev"
+  if [[ $latest_commit_message == *-feat ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *-fix ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for dev environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == qa-* ]]; then
+  env="Qa"
+  if [[ $latest_commit_message == *-feat ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *-fix ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for qa environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == prod-* ]]; then
+  env="Prod"
+  if [[ $latest_commit_message == *-breakout ]]; then
+    major=$((major + 1))
+    minor=0
+    patch=0
+  else
+    echo "Invalid commit message for prod environment."
+    exit 0
+  fi
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Debugging: Output the new version and new tag
+echo "New version: $new_version"
+echo "New tag: $new_tag"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation of Changes:
+Extract Actual Commit Message:
+
+If the latest commit message is a PR merge (contains "Merged PR"), the script fetches the second-to-last commit message, which should be the actual commit message of the changes merged.
+Debugging:
+
+Added debugging statements to output the latest commit message and the extracted actual commit message for verification.
+Next Steps:
+Run the Updated Script:
+
+With commit messages dev-feat and dev-fix Added file update_version.sh.
+Check the Output:
+
+Verify if the script correctly detects the commit messages and prints the expected debug information.
+Ensure the version is updated and a new tag is created as expected.
+Adjust if Necessary:
+
+Based on the output of the debugging statements, adjust the script if necessary to ensure it handles the commit messages correctly.
+no these words can be anywhere in the message dev-fix or qa-fix or dev-feat or qa-feat or prod-breakout 
+
+so suggest me logic accordingly
+ChatGPT
+Given that the environment and type keywords can appear anywhere in the commit message, we need to modify the script to search for these keywords within the commit message regardless of their position.
+
+Here's the updated script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Debugging: Output the latest commit message
+echo "Latest commit message: $latest_commit_message"
+
+# Extract the actual commit message if it is a merged PR
+if [[ $latest_commit_message == *"Merged PR"* ]]; then
+  latest_commit_message=$(git log -2 --pretty=%B | tail -1)
+fi
+
+# Debugging: Output the actual commit message after extraction
+echo "Actual commit message: $latest_commit_message"
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == *"dev-"* ]]; then
+  env="Dev"
+  if [[ $latest_commit_message == *"-feat"* ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *"-fix"* ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for dev environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == *"qa-"* ]]; then
+  env="Qa"
+  if [[ $latest_commit_message == *"-feat"* ]]; then
+    minor=$((minor + 1))
+    patch=0
+  elif [[ $latest_commit_message == *"-fix"* ]]; then
+    patch=$((patch + 1))
+  else
+    echo "Invalid commit message for qa environment."
+    exit 0
+  fi
+elif [[ $latest_commit_message == *"prod-"* ]]; then
+  env="Prod"
+  if [[ $latest_commit_message == *"-breakout"* ]]; then
+    major=$((major + 1))
+    minor=0
+    patch=0
+  else
+    echo "Invalid commit message for prod environment."
+    exit 0
+  fi
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Debugging: Output the new version and new tag
+echo "New version: $new_version"
+echo "New tag: $new_tag"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation of Changes:
+Search for Keywords Anywhere:
+
+The script now uses *keyword* to match the environment and type keywords anywhere in the commit message.
+Debugging Statements:
+
+Added debugging statements to output the latest and actual commit messages to verify the extraction process.
+Next Steps:
+Run the Updated Script:
+
+Test the script with commit messages containing dev-feat, dev-fix, qa-feat, qa-fix, and prod-breakout keywords.
+Verify the Output:
+
+Ensure the script correctly detects the keywords, updates the version, and creates the new tag as expected.
+Adjust if Necessary:
+
+Based on the results, further adjust the script if needed to handle all scenarios correctly.
+we have nothing to do with word Merged PR 
+
+what we are intered is these 5 words
+ dev-feat, dev-fix, qa-feat, qa-fix, and prod-breakout keywords.
+ChatGPT
+Got it. Let's simplify the script to focus solely on detecting the specified keywords within the commit message and handle the version increments accordingly.
+
+Here is the updated script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Debugging: Output the latest commit message
+echo "Latest commit message: $latest_commit_message"
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == *"dev-feat"* ]]; then
+  env="Dev"
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *"dev-fix"* ]]; then
+  env="Dev"
+  patch=$((patch + 1))
+elif [[ $latest_commit_message == *"qa-feat"* ]]; then
+  env="Qa"
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *"qa-fix"* ]]; then
+  env="Qa"
+  patch=$((patch + 1))
+elif [[ $latest_commit_message == *"prod-breakout"* ]]; then
+  env="Prod"
+  major=$((major + 1))
+  minor=0
+  patch=0
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Debugging: Output the new version and new tag
+echo "New version: $new_version"
+echo "New tag: $new_tag"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation of the Script:
+Fetch Tags: Pull the tags from the remote repository.
+Get Latest Tag: Get the most recent tag or set a default version if no tags exist.
+Extract and Parse Version: Extract the version numbers (major, minor, patch) from the latest tag.
+Get Latest Commit Message: Retrieve the latest commit message.
+Determine Environment and Version Increment:
+Check the commit message for the presence of dev-feat, dev-fix, qa-feat, qa-fix, and prod-breakout keywords.
+Increment the version numbers based on the keywords found.
+Construct New Version and Tag: Form the new version and tag.
+Create and Push New Tag: Create the new tag and push it to the remote repository.
+Output New Version: Update the build number in Azure DevOps.
+Next Steps:
+Run the Updated Script: Test the script with commit messages containing the specified keywords.
+Verify the Output: Ensure the script correctly detects the keywords, updates the version, and creates the new tag as expected.
+Adjust if Necessary: Based on the results, further adjust the script if needed to handle all scenarios correctly.
+the code is working like charm now but getting an error while pushing the tag 
+
+pipeline logs 
+
+current version: 0.0.0
+latest_commit_message : Merged PR 11335: dev-feat Updated update_version.sh
+
+dev-feat Updated update_version.sh
+new version is : 0.1.0
+new tag: Dev/feature-0.1.0
+./update_version.sh: command substitution: line 78: syntax error near unexpected token [System.Text.Encoding]::UTF8.GetBytes'
+./update_version.sh: command substitution: line 78: [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$GIT_PAT")))"'
+Version updated to 0.1.0
+##[section]Async Command Start: Update Build Number
+Update build number to 0.1.0 for build 21407
+##[section]Async Command End: Update Build Number
+##[section]Finishing: Run Versioning Script
+ChatGPT
+The error occurs due to the use of a PowerShell syntax within a Bash script. The line causing the issue is trying to encode the Personal Access Token (PAT) using PowerShell syntax. We need to convert this line to use Bash syntax.
+
+Here's the updated script with the corrected PAT encoding:
+
+bash
+Copy code
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Debugging: Output the latest commit message
+echo "Latest commit message: $latest_commit_message"
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == *"dev-feat"* ]]; then
+  env="Dev"
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *"dev-fix"* ]]; then
+  env="Dev"
+  patch=$((patch + 1))
+elif [[ $latest_commit_message == *"qa-feat"* ]]; then
+  env="Qa"
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *"qa-fix"* ]]; then
+  env="Qa"
+  patch=$((patch + 1))
+elif [[ $latest_commit_message == *"prod-breakout"* ]]; then
+  env="Prod"
+  major=$((major + 1))
+  minor=0
+  patch=0
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Debugging: Output the new version and new tag
+echo "New version: $new_version"
+echo "New tag: $new_tag"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Encode the GIT_PAT using base64 (Bash syntax)
+encoded_pat=$(printf ":$GIT_PAT" | base64)
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $encoded_pat" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]$new_version"
+echo "Version updated to $new_version"
+Explanation of the Changes:
+Encoding PAT in Bash: The line encoded_pat=$(printf ":$GIT_PAT" | base64) uses Bash syntax to encode the PAT. This ensures that the PAT is encoded correctly and avoids the error caused by using PowerShell syntax.
+Next Steps:
+Test the Updated Script: Run the updated script in your Azure DevOps pipeline.
+Verify the Push: Ensure that the new tag is pushed to the remote repository successfully.
+Check for Errors: Verify that the script completes without errors and that the build number is updated as expected.
+convert this code for powershell 
+
+#!/bin/bash
+
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+
+if [ -z "$latest_tag" ]; then
+  latest_tag="0.0.0"
+fi
+
+# Extract the version part of the latest tag
+version_part=$(echo $latest_tag | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+
+# Parse the version into major, minor, and patch
+IFS='.' read -r -a version_parts <<< "$version_part"
+major=${version_parts[0]}
+minor=${version_parts[1]}
+patch=${version_parts[2]}
+
+# Get the latest commit message
+latest_commit_message=$(git log -1 --pretty=%B)
+
+# Debugging: Output the latest commit message
+echo "Latest commit message: $latest_commit_message"
+
+# Determine the environment and increment type
+if [[ $latest_commit_message == *"dev-feat"* ]]; then
+  env="Dev"
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *"dev-fix"* ]]; then
+  env="Dev"
+  patch=$((patch + 1))
+elif [[ $latest_commit_message == *"qa-feat"* ]]; then
+  env="Qa"
+  minor=$((minor + 1))
+  patch=0
+elif [[ $latest_commit_message == *"qa-fix"* ]]; then
+  env="Qa"
+  patch=$((patch + 1))
+elif [[ $latest_commit_message == *"prod-breakout"* ]]; then
+  env="Prod"
+  major=$((major + 1))
+  minor=0
+  patch=0
+else
+  echo "No version change needed."
+  exit 0
+fi
+
+# Construct the new version
+new_version="$major.$minor.$patch"
+
+# Construct the new tag
+new_tag="$env/feature-$new_version"
+
+# Debugging: Output the new version and new tag
+echo "New version: $new_version"
+echo "New tag: $new_tag"
+
+# Create a new tag
+git tag -a "$new_tag" -m "Release $new_tag"
+
+# Encode the GIT_PAT using base64 (Bash syntax)
+encoded_pat=$(printf ":$GIT_PAT" | base64)
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $encoded_pat" push origin "$new_tag"
+
+# Output the new version
+echo "##vso[build.updatebuildnumber]"$env"-"$new_version""
+echo "Version updated to $new_version"
+ChatGPT
+Here is the equivalent PowerShell script for your provided Bash script:
+
+powershell
+Copy code
+# Fetch tags from remote
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+$latestTag = git describe --tags $(git rev-list --tags --max-count=1) 2>$null
+
+if (-not $latestTag) {
+    $latestTag = "0.0.0"
+}
+
+# Extract the version part of the latest tag
+$versionPart = $latestTag -match '[0-9]+\.[0-9]+\.[0-9]+' | Out-Null
+$versionPart = $matches[0]
+
+# Parse the version into major, minor, and patch
+$versionParts = $versionPart -split '\.'
+$major = [int]$versionParts[0]
+$minor = [int]$versionParts[1]
+$patch = [int]$versionParts[2]
+
+# Get the latest commit message
+$latestCommitMessage = git log -1 --pretty=%B
+
+# Debugging: Output the latest commit message
+Write-Output "Latest commit message: $latestCommitMessage"
+
+# Determine the environment and increment type
+if ($latestCommitMessage -like "*dev-feat*") {
+    $env = "Dev"
+    $minor++
+    $patch = 0
+} elseif ($latestCommitMessage -like "*dev-fix*") {
+    $env = "Dev"
+    $patch++
+} elseif ($latestCommitMessage -like "*qa-feat*") {
+    $env = "Qa"
+    $minor++
+    $patch = 0
+} elseif ($latestCommitMessage -like "*qa-fix*") {
+    $env = "Qa"
+    $patch++
+} elseif ($latestCommitMessage -like "*prod-breakout*") {
+    $env = "Prod"
+    $major++
+    $minor = 0
+    $patch = 0
+} else {
+    Write-Output "No version change needed."
+    exit 0
+}
+
+# Construct the new version
+$newVersion = "$major.$minor.$patch"
+
+# Construct the new tag
+$newTag = "$env/feature-$newVersion"
+
+# Debugging: Output the new version and new tag
+Write-Output "New version: $newVersion"
+Write-Output "New tag: $newTag"
+
+# Create a new tag
+git tag -a "$newTag" -m "Release $newTag"
+
+# Encode the GIT_PAT using base64
+$encodedPat = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(":$env:GIT_PAT"))
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $encodedPat" push origin "$newTag"
+
+# Output the new version
+Write-Output "##vso[build.updatebuildnumber]$newVersion"
+Write-Output "Version updated to $newVersion"
+Explanation of the PowerShell Script:
+Fetch Tags from Remote:
+
+powershell
+Copy code
+git fetch --tags
+Get the Latest Tag:
+
+powershell
+Copy code
+$latestTag = git describe --tags $(git rev-list --tags --max-count=1) 2>$null
+if (-not $latestTag) {
+    $latestTag = "0.0.0"
+}
+Extract and Parse Version Parts:
+
+powershell
+Copy code
+$versionPart = $latestTag -match '[0-9]+\.[0-9]+\.[0-9]+' | Out-Null
+$versionPart = $matches[0]
+$versionParts = $versionPart -split '\.'
+$major = [int]$versionParts[0]
+$minor = [int]$versionParts[1]
+$patch = [int]$versionParts[2]
+Get the Latest Commit Message:
+
+powershell
+Copy code
+$latestCommitMessage = git log -1 --pretty=%B
+Write-Output "Latest commit message: $latestCommitMessage"
+Determine the Environment and Increment Type:
+
+powershell
+Copy code
+if ($latestCommitMessage -like "*dev-feat*") {
+    $env = "Dev"
+    $minor++
+    $patch = 0
+} elseif ($latestCommitMessage -like "*dev-fix*") {
+    $env = "Dev"
+    $patch++
+} elseif ($latestCommitMessage -like "*qa-feat*") {
+    $env = "Qa"
+    $minor++
+    $patch = 0
+} elseif ($latestCommitMessage -like "*qa-fix*") {
+    $env = "Qa"
+    $patch++
+} elseif ($latestCommitMessage -like "*prod-breakout*") {
+    $env = "Prod"
+    $major++
+    $minor = 0
+    $patch = 0
+} else {
+    Write-Output "No version change needed."
+    exit 0
+}
+Construct the New Version and Tag:
+
+powershell
+Copy code
+$newVersion = "$major.$minor.$patch"
+$newTag = "$env/feature-$newVersion"
+Write-Output "New version: $newVersion"
+Write-Output "New tag: $newTag"
+Create and Push the New Tag:
+
+powershell
+Copy code
+git tag -a "$newTag" -m "Release $newTag"
+$encodedPat = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(":$env:GIT_PAT"))
+git -c http.extraHeader="Authorization: Basic $encodedPat" push origin "$newTag"
+Output the New Version:
+
+powershell
+Copy code
+Write-Output "##vso[build.updatebuildnumber]$newVersion"
+Write-Output "Version updated to $newVersion"
+
+
+
+
+
