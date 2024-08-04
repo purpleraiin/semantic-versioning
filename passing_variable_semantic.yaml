@@ -122,4 +122,105 @@ stages:
       displayName: 'Display Latest Version'
 
 
+trigger:
+  branches:
+    include:
+      - 'master' # Trigger on changes to the main branch
+
+stages:
+- stage: SemanticVersioning
+  jobs:
+  - job: SemanticVersioningJob
+    displayName: 'Semantic Versioning and Tagging'
+    pool:
+      name: Default
+    steps:
+    - checkout: self
+      fetchDepth: 0
+
+    - powershell: |
+        # Call the versioning script
+        .\update_version.ps1
+      displayName: 'Run Versioning Script'
+      env:
+        GIT_PAT: $(GIT_PAT) # Use the PAT as an environment variable
+      name: setVersion
+
+  - job: PrintVersion
+    dependsOn: SemanticVersioningJob
+    variables:
+      latestVersionFromJob: $[ dependencies.SemanticVersioningJob.outputs['setVersion.latestVersion'] ]
+    steps:
+    - powershell: Write_Output "Latest Version from Job $(latestVersionFromJob)""
+      displayName: 'Display Latest Version'
+
+
+# Fetch tags from remotee
+git fetch --tags
+
+# Get the latest tag, or use the base tag if no tags exist
+$latestVersion = git describe --tags (git rev-list --tags --max-count=1) 2>$null
+
+if (-not $latestVersion) {
+  $latestVersion = "1.0.0"
+}
+
+# Parse the version into major, minor, and patch
+$versionParts = $latestVersion -split '\.'
+$major = [int]$versionParts[0]
+$minor = [int]$versionParts[1]
+$patch = [int]$versionParts[2]
+
+# Get the latest commit message
+$latestCommitMessage = git log -1 --pretty=%B
+
+# Determine the version increment type
+if ($latestCommitMessage -like "*breakout*") {
+  $major++
+  $minor = 0
+  $patch = 0
+} elseif ($latestCommitMessage -like "*feat*") {
+  $minor++
+  $patch = 0
+} elseif ($latestCommitMessage -like "*fix*") {
+  $patch++
+} else {
+  Write-Output "No version change needed."
+  $newVersion = "$major.$minor.$patch"
+  Write-Output "Version has not been updated $newVersion"
+  exit 0
+}
+
+# Construct the new version
+$newVersion = "$major.$minor.$patch"
+
+# Create a new tag
+git tag -a "$newVersion" -m "Release $newVersion"
+
+# Push the new tag to remote
+git -c http.extraHeader="Authorization: Basic $([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(":$env:GIT_PAT")))" push origin "$newVersion"
+
+# Output the new version
+Write-Output "Latest Tag is  $latestVersion"
+Write-Output "##vso[build.updatebuildnumber]$newVersion"
+Write-Output "Version updated to $newVersion"
+Write-Output "##vso[task.setvariable variable=latestVersion;isOutput=true]$newVersion"
+Write-Host "##vso[task.setvariable variable=latestVersion;isOutput=true]$newVersion"
+Write-Output "Now Latest Version is new version $latestVersion"
+Write-Host "Set Environment Variable to ($env:latestVersion)"
+
+fatal: unable to get credential storage lock in 1000 ms: No such file or directory
+To https://marathonpetroleum.visualstudio.com/RefiningPilot/_git/Refining-Sem-Ver
+ * [new tag]         2.3.6 -> 2.3.6
+Latest Tag is  2.3.5
+Version updated to 2.3.6
+Now Latest Version is new version 2.3.5
+Set Environment Variable to ()
+Async Command Start: Update Build Number
+Update build number to 2.3.6 for build 329794
+Async Command End: Update Build Number
+Finishing: Run Versioning Script
+
+
+
 
